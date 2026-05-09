@@ -464,13 +464,15 @@ window.Game = (() => {
 
     // 本体
     const baseColor = p.state === "hitstun" ? "#ff6060" : p.char.color;
-    ctx.fillStyle = baseColor;
-    ctx.fillRect(p.x, p.y, p.w, p.h);
-
-    // 顔 (向き)
-    ctx.fillStyle = p.char.accent;
-    const eyeX = p.facing === 1 ? p.x + p.w - 12 : p.x + 6;
-    ctx.fillRect(eyeX, p.y + 12, 6, 6);
+    if (typeof p.char.draw === "function") {
+      p.char.draw(ctx, p.x, p.y, p.w, p.h, p.facing, baseColor, p.char.accent);
+    } else {
+      ctx.fillStyle = baseColor;
+      ctx.fillRect(p.x, p.y, p.w, p.h);
+      ctx.fillStyle = p.char.accent;
+      const eyeX = p.facing === 1 ? p.x + p.w - 12 : p.x + 6;
+      ctx.fillRect(eyeX, p.y + 12, 6, 6);
+    }
 
     // プレイヤー番号バッジ
     ctx.fillStyle = p.index === 0 ? "#ff8c4a" : "#5fb4ff";

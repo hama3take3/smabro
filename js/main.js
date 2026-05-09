@@ -113,11 +113,19 @@
       ctx.lineWidth = 2;
       ctx.strokeRect(x, y, cardW, cardH);
 
-      // キャラ立ち絵代わり (色矩形)
-      ctx.fillStyle = c.color;
-      ctx.fillRect(x + cardW / 2 - 30, y + 30, 60, 90);
-      ctx.fillStyle = c.accent;
-      ctx.fillRect(x + cardW / 2 + 12, y + 50, 8, 8);
+      // キャラ立ち絵
+      const ix = x + cardW / 2 - 30;
+      const iy = y + 30;
+      const iw = 60;
+      const ih = 90;
+      if (typeof c.draw === "function") {
+        c.draw(ctx, ix, iy, iw, ih, 1, c.color, c.accent);
+      } else {
+        ctx.fillStyle = c.color;
+        ctx.fillRect(ix, iy, iw, ih);
+        ctx.fillStyle = c.accent;
+        ctx.fillRect(x + cardW / 2 + 12, y + 50, 8, 8);
+      }
 
       // 名前
       ctx.fillStyle = "#fff";
