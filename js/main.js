@@ -15,6 +15,14 @@
     confirmed: [false, false],
   };
 
+  // 短縮 SFX 呼び出し
+  const sfx = (name) => {
+    const k = window.SfxKit;
+    if (k && k.sfx && typeof k.sfx[name] === "function") k.sfx[name]();
+  };
+  const startBGM = () => window.SfxKit && window.SfxKit.startBGM();
+  const stopBGM = () => window.SfxKit && window.SfxKit.stopBGM();
+
   // ----- タイトル画面 -----
   function updateTitle() {
     if (
@@ -22,6 +30,7 @@
       window.Input.pressed("Enter") ||
       window.Input.pressed("KeyZ")
     ) {
+      sfx("confirm");
       scene = "select";
       select.cursors = [0, 1 % window.CHARACTERS.length];
       select.confirmed = [false, false];
@@ -65,15 +74,23 @@
     for (let i = 0; i < 2; i++) {
       if (select.confirmed[i]) {
         // 確定解除
-        if (I.pressed(km[i].shield)) select.confirmed[i] = false;
+        if (I.pressed(km[i].shield)) {
+          select.confirmed[i] = false;
+          sfx("cancel");
+        }
         continue;
       }
-      if (I.pressed(km[i].left))
+      if (I.pressed(km[i].left)) {
         select.cursors[i] = (select.cursors[i] + n - 1) % n;
-      if (I.pressed(km[i].right))
+        sfx("cursor");
+      }
+      if (I.pressed(km[i].right)) {
         select.cursors[i] = (select.cursors[i] + 1) % n;
+        sfx("cursor");
+      }
       if (I.pressed(km[i].jab) || I.pressed(km[i].special)) {
         select.confirmed[i] = true;
+        sfx("confirm");
       }
     }
     // 両者確定したら開始
@@ -82,9 +99,13 @@
       const b = window.CHARACTERS[select.cursors[1]];
       match = window.Game.newMatch(a, b);
       scene = "battle";
+      startBGM();
     }
     // R でタイトルへ
-    if (I.pressed("KeyR")) scene = "title";
+    if (I.pressed("KeyR")) {
+      scene = "title";
+      sfx("cancel");
+    }
   }
 
   function drawSelect() {
@@ -187,6 +208,12 @@
     if (!match) return;
     if (!match.over) {
       window.Game.step(match);
+      // 試合終了の瞬間に BGM 停止 + 勝利ジングル
+      if (match.over && !match._winNotified) {
+        match._winNotified = true;
+        stopBGM();
+        sfx("win");
+      }
     } else {
       if (
         window.Input.pressed("Enter") ||
@@ -195,11 +222,15 @@
         const a = window.CHARACTERS[select.cursors[0]];
         const b = window.CHARACTERS[select.cursors[1]];
         match = window.Game.newMatch(a, b);
+        sfx("confirm");
+        startBGM();
       }
     }
     if (window.Input.pressed("KeyR")) {
       scene = "title";
       match = null;
+      stopBGM();
+      sfx("cancel");
     }
   }
 
@@ -220,6 +251,8 @@
       updateBattle();
       drawBattle();
     }
+    // BGM の look-ahead スケジューラを毎フレーム進める
+    if (window.SfxKit) window.SfxKit.bgmUpdate();
     window.Input.endFrame();
     requestAnimationFrame(loop);
   }

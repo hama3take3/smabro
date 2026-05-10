@@ -31,6 +31,12 @@ window.Game = (() => {
   const aabb = (a, b) =>
     a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
+  // SfxKit がロードされていなくても動作するよう安全に呼ぶ
+  const sfx = (name) => {
+    const k = window.SfxKit;
+    if (k && k.sfx && typeof k.sfx[name] === "function") k.sfx[name]();
+  };
+
   // プレイヤーを作る
   function makePlayer(index, charDef, spawnX) {
     return {
@@ -68,8 +74,12 @@ window.Game = (() => {
   }
 
   function newMatch(charA, charB) {
+    // 開始時にカメラを少し引き気味にして全景を見せる
+    const players = [makePlayer(0, charA, 360), makePlayer(1, charB, 664)];
+    const cx = (players[0].x + players[0].w / 2 + players[1].x + players[1].w / 2) / 2;
+    const cy = (players[0].y + players[0].h / 2 + players[1].y + players[1].h / 2) / 2;
     return {
-      players: [makePlayer(0, charA, 360), makePlayer(1, charB, 664)],
+      players,
       projectiles: [],
       effects: [],
       timer: MATCH_TIME_FRAMES,
@@ -77,6 +87,8 @@ window.Game = (() => {
       over: false,
       winner: null,
       flashFrame: 0,
+      camera: { x: cx, y: cy, zoom: 1.0 },
+      _winNotified: false,
     };
   }
 
@@ -180,9 +192,11 @@ window.Game = (() => {
       // ジャンプ
       if (input.up && p.jumpsLeft > 0) {
         p.vy = -p.char.jump;
+        const wasGround = p.onGround;
         p.jumpsLeft--;
         // 空中ジャンプは少し速度をリセット
         if (!p.onGround) p.vx *= 0.8;
+        sfx(wasGround ? "jump" : "doubleJump");
       }
       // 攻撃発動
       if (input.jab) startAttack(p, "jab");
@@ -249,6 +263,7 @@ window.Game = (() => {
       p.state = "dead";
       p.deadTimer = 60;
       match.flashFrame = 8;
+      sfx("ko");
       // 試合終了判定は外側で
     }
   }
@@ -259,6 +274,7 @@ window.Game = (() => {
     p.attackPhase = "startup";
     p.attackElapsed = 0;
     p.attackHitTargets.clear();
+    sfx(key); // jab / strong / special
   }
 
   // -------------------- 飛び道具 --------------------
@@ -343,6 +359,9 @@ window.Game = (() => {
               target.state = "shieldBroken";
               target.stateTimer = 60;
               target.shielding = false;
+              sfx("shieldBreak");
+            } else {
+              sfx("shield");
             }
             spawnEffect(match, hb.x + hb.w / 2, hb.y + hb.h / 2, "#5fd0ff");
           } else {
@@ -373,6 +392,7 @@ window.Game = (() => {
     target.jumpsLeft = 1;
     spawnEffect(match, target.x + target.w / 2, target.y + target.h / 2, "#ffd24a");
     match.flashFrame = Math.min(6, Math.max(match.flashFrame, Math.floor(kb / 2)));
+    sfx(kb >= 9 ? "bigHit" : "hit");
   }
 
   function spawnEffect(match, x, y, color) {
@@ -408,6 +428,53 @@ window.Game = (() => {
     }
   }
 
+  // -------------------- カメラ --------------------
+  // 2 人の中点を追い、距離に応じてズームイン / アウトする。
+  function updateCamera(match) {
+    const cam = match.camera;
+    const players = match.players;
+    const visible = players.filter((p) => p.state !== "dead");
+    let cx, cy, targetZoom;
+    if (visible.length >= 2) {
+      const a = visible[0];
+      const b = visible[1];
+      const padding = 220;
+      const minX = Math.min(a.x, b.x) - padding;
+      const maxX = Math.max(a.x + a.w, b.x + b.w) + padding;
+      const minY = Math.min(a.y, b.y) - padding;
+      const maxY = Math.max(a.y + a.h, b.y + b.h) + padding;
+      cx = (minX + maxX) / 2;
+      cy = (minY + maxY) / 2;
+      const reqW = maxX - minX;
+      const reqH = maxY - minY;
+      // 2 人を収めるのに必要なズーム (大きいほど寄る)
+      let z = Math.min(W / reqW, H / reqH);
+      // 近距離で 1.7 倍まで寄り、最遠で 1.0 (全景) まで戻す
+      z = Math.max(1.0, Math.min(1.7, z));
+      targetZoom = z;
+    } else if (visible.length === 1) {
+      const a = visible[0];
+      cx = a.x + a.w / 2;
+      cy = a.y + a.h / 2;
+      targetZoom = 1.3;
+    } else {
+      cx = W / 2;
+      cy = H / 2;
+      targetZoom = 1.0;
+    }
+
+    // 滑らかに追従 (位置:0.12 / ズーム:0.06)
+    cam.x += (cx - cam.x) * 0.12;
+    cam.y += (cy - cam.y) * 0.12;
+    cam.zoom += (targetZoom - cam.zoom) * 0.06;
+
+    // ステージ外を映しすぎないようにクランプ
+    const visW = W / cam.zoom;
+    const visH = H / cam.zoom;
+    cam.x = clamp(cam.x, visW / 2, W - visW / 2);
+    cam.y = clamp(cam.y, visH / 2 - 100, H - visH / 2 + 100);
+  }
+
   // -------------------- 1 フレーム進行 --------------------
   function step(match) {
     if (match.over) return;
@@ -421,28 +488,31 @@ window.Game = (() => {
     updateProjectiles(match);
     updateEffects(match);
     checkWinner(match);
+    updateCamera(match);
   }
 
   // -------------------- 描画 --------------------
-  function drawStage(ctx) {
-    // 背景グラデ
+  // 背景は画面空間に固定、ステージはカメラ内に描画する。
+  function drawBackground(ctx, cam) {
     const g = ctx.createLinearGradient(0, 0, 0, H);
     g.addColorStop(0, "#0a1130");
     g.addColorStop(1, "#1a0e2c");
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
 
-    // 遠景の星
+    // パララックスっぽく星をカメラに連動させて少しだけ動かす
     ctx.fillStyle = "rgba(180,200,255,0.5)";
-    for (let i = 0; i < 60; i++) {
-      const x = (i * 137) % W;
-      const y = (i * 71) % (H - 200);
+    const px = cam ? -((cam.x - W / 2) * 0.15) : 0;
+    const py = cam ? -((cam.y - H / 2) * 0.12) : 0;
+    for (let i = 0; i < 80; i++) {
+      const x = ((i * 137 + px) % W + W) % W;
+      const y = ((i * 71 + py) % (H - 200) + (H - 200)) % (H - 200);
       ctx.fillRect(x, y, 2, 2);
     }
+  }
 
-    // メイン床
+  function drawPlatforms(ctx) {
     drawPlatform(ctx, STAGE.main, "#3a4990", "#aab8ff");
-    // すり抜け床
     for (const s of STAGE.soft) drawPlatform(ctx, s, "#374072", "#8aa0ff");
   }
 
@@ -540,7 +610,7 @@ window.Game = (() => {
     }
   }
 
-  function drawEffects(ctx, match) {
+  function drawWorldEffects(ctx, match) {
     for (const e of match.effects) {
       const t = e.life / e.max;
       ctx.save();
@@ -553,6 +623,9 @@ window.Game = (() => {
       ctx.stroke();
       ctx.restore();
     }
+  }
+
+  function drawScreenFlash(ctx, match) {
     if (match.flashFrame > 0) {
       ctx.fillStyle = `rgba(255,255,255,${0.06 * match.flashFrame})`;
       ctx.fillRect(0, 0, W, H);
@@ -637,10 +710,26 @@ window.Game = (() => {
   }
 
   function render(ctx, match) {
-    drawStage(ctx);
+    const cam = match.camera;
+
+    // 背景は画面空間
+    drawBackground(ctx, cam);
+
+    // ワールドはカメラ変換を適用
+    ctx.save();
+    ctx.translate(W / 2, H / 2);
+    ctx.scale(cam.zoom, cam.zoom);
+    ctx.translate(-cam.x, -cam.y);
+
+    drawPlatforms(ctx);
     drawProjectiles(ctx, match);
     for (const p of match.players) drawPlayer(ctx, p);
-    drawEffects(ctx, match);
+    drawWorldEffects(ctx, match);
+
+    ctx.restore();
+
+    // HUD は画面空間
+    drawScreenFlash(ctx, match);
     drawHUD(ctx, match);
     if (match.over) drawResult(ctx, match);
   }
